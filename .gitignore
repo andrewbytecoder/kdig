@@ -1,0 +1,7 @@
+/bin/
+/dist/
+/.cache/
+/kubectl-dig
+/kubectl-dig.exe
+*.out
+
