@@ -22,7 +22,7 @@ type Options struct {
 
 func NewOptions() *Options {
 	return &Options{
-		Output:         "table",
+		Output:         "text",
 		RequestTimeout: 15 * time.Second,
 		EventSince:     time.Hour,
 		Out:            os.Stdout,
@@ -32,7 +32,7 @@ func NewOptions() *Options {
 func (options *Options) AddFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&options.Kubeconfig, "kubeconfig", options.Kubeconfig, "Path to the kubeconfig file")
 	flags.StringVar(&options.ContextName, "context", options.ContextName, "Kubeconfig context to use")
-	flags.StringVarP(&options.Output, "output", "o", options.Output, "Output format: table or json")
+	flags.StringVarP(&options.Output, "output", "o", options.Output, "Output format: text or json")
 	flags.DurationVar(&options.RequestTimeout, "request-timeout", options.RequestTimeout, "Timeout for Kubernetes and HTTP requests")
 	flags.DurationVar(&options.EventSince, "event-since", options.EventSince, "Include warning events newer than this duration")
 }
@@ -49,8 +49,8 @@ func (options *Options) Clients() (*kube.Clients, error) {
 }
 
 func (options *Options) Validate() error {
-	if options.Output != "table" && options.Output != "json" {
-		return fmt.Errorf("unsupported output format %q; use table or json", options.Output)
+	if options.Output != "text" && options.Output != "json" {
+		return fmt.Errorf("unsupported output format %q; use text or json", options.Output)
 	}
 	if options.RequestTimeout <= 0 {
 		return fmt.Errorf("request-timeout must be greater than zero")

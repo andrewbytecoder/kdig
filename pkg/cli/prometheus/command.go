@@ -43,11 +43,6 @@ func NewCommand(commonOptions *common.Options, options *Options) *cobra.Command 
 	return command
 }
 
-func (options *Options) AddRootFlags(flags *pflag.FlagSet) {
-	flags.StringVar(&options.Namespace, "prometheus-namespace", options.Namespace, "Prometheus namespace")
-	flags.StringVar(&options.PrometheusURL, "prometheus-url", options.PrometheusURL, "Prometheus base URL for target and rule checks")
-}
-
 func (options *Options) AddCommandFlags(flags *pflag.FlagSet) {
 	flags.StringVarP(&options.Namespace, "namespace", "n", options.Namespace, "Prometheus namespace")
 	flags.StringVar(&options.PrometheusURL, "prometheus-url", options.PrometheusURL, "Prometheus base URL for target and rule checks")

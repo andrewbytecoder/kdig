@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestWriteTable(t *testing.T) {
+func TestWriteText(t *testing.T) {
 	start := time.Date(2026, time.October, 15, 10, 0, 0, 0, time.UTC)
 	report := Report{
 		Target:     "metallb",
@@ -25,12 +25,15 @@ func TestWriteTable(t *testing.T) {
 	}
 	var output bytes.Buffer
 
-	if err := Write(&output, report, "table"); err != nil {
+	if err := Write(&output, report, "text"); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	for _, expected := range []string{"TARGET", "SEVERITY", "BGP neighbor state", "Suggestion:", "CRITICAL"} {
+	for _, expected := range []string{"Target: metallb", "[WARNING] bgp-neighbors", "BGP neighbor state", "Suggestion:", "Summary:"} {
 		if !strings.Contains(output.String(), expected) {
-			t.Fatalf("table output does not contain %q:\n%s", expected, output.String())
+			t.Fatalf("text output does not contain %q:\n%s", expected, output.String())
 		}
+	}
+	if strings.Contains(output.String(), "┌") || strings.Contains(output.String(), "|") {
+		t.Fatalf("text output unexpectedly contains table borders:\n%s", output.String())
 	}
 }

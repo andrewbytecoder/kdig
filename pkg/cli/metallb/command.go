@@ -47,12 +47,6 @@ func NewCommand(commonOptions *common.Options, options *Options) *cobra.Command 
 	return command
 }
 
-func (options *Options) AddRootFlags(flags *pflag.FlagSet) {
-	flags.StringVar(&options.Namespace, "metallb-namespace", options.Namespace, "MetalLB namespace")
-	flags.DurationVar(&options.PendingFor, "pending-for", options.PendingFor, "Ignore newer LoadBalancer services without an external address")
-	flags.StringVar(&options.FRRContainer, "frr-container", options.FRRContainer, "FRR container name in MetalLB speaker pods")
-}
-
 func (options *Options) AddCommandFlags(flags *pflag.FlagSet) {
 	flags.StringVarP(&options.Namespace, "namespace", "n", options.Namespace, "MetalLB namespace")
 	flags.DurationVar(&options.PendingFor, "pending-for", options.PendingFor, "Ignore newer LoadBalancer services without an external address")
