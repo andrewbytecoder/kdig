@@ -30,7 +30,30 @@ kubectl dig metallb --namespace metallb-system
 kubectl dig prometheus --namespace monitoring
 kubectl dig amtool --namespace monitoring
 kubectl dig podinfo api-0 --namespace apps
+kubectl dig netcap --namespace apps --pod api-0
 ```
+
+Capture packets from a Pod network namespace directly to the current machine:
+
+```bash
+# Capture all traffic for 30 seconds to ./api-0.pcap.
+kubectl dig netcap -n apps --pod api-0
+
+# Capture TCP port 443 for 60 seconds to a chosen local file.
+kubectl dig netcap -n apps --pod api-0 \
+  --protocol tcp --port 443 --duration 60s -w api-https.pcap
+
+# Directional filters and a packet-count limit.
+kubectl dig netcap -n apps --pod api-0 \
+  --protocol udp --src-host 10.0.0.10 --dst-port 53 \
+  --count 100 -w dns.pcap
+
+# Additional tcpdump BPF expression.
+kubectl dig netcap -n apps --pod api-0 \
+  --filter 'tcp[tcpflags] & tcp-syn != 0' -w syn.pcap
+```
+
+`netcap` resolves the Pod network PID using the same CRI inspection as `podinfo`, runs `nsenter -t PID -n -- tcpdump` on the node, and streams pcap bytes over SSH directly into the local file. The default output is `POD.pcap`; existing files are protected unless `--overwrite` is specified. Ctrl+C preserves a partial pcap when a valid pcap header was received. The node must provide `crictl`, `nsenter`, `tcpdump`, and GNU `timeout`, and the SSH account must have permission to inspect the runtime and capture packets.
 
 Inspect a Pod and its node-side network namespace:
 
@@ -114,6 +137,13 @@ Pod information checks include:
 - each container's network namespace PID and namespace identity
 - a ready-to-run `nsenter -t PID -n` command
 
+Network capture supports:
+
+- protocol filters for TCP, UDP, ICMP, ICMPv6, ARP, IPv4, and IPv6
+- source/destination ports and hosts, packet count, interface, snap length, and duration
+- additional quoted tcpdump BPF expressions with `--filter`
+- direct local pcap streaming without storing a capture file on the Kubernetes node
+
 The active kubeconfig and context are used by default. Override them with `--kubeconfig` and `--context`.
 
 ## Project layout
@@ -124,12 +154,14 @@ pkg/cli/                root command assembly
 pkg/cli/common/         shared flags, clients, and report output
 pkg/cli/amtool/         Alertmanager amtool subcommand
 pkg/cli/metallb/        MetalLB subcommand
+pkg/cli/netcap/         Pod network capture subcommand
 pkg/cli/podinfo/        Pod and network namespace subcommand
 pkg/cli/prometheus/     Prometheus subcommand
 pkg/diagnostic/         findings, reports, output, and exit codes
 pkg/kube/               Kubernetes clients and shared health checks
 pkg/amtool/             Alertmanager amtool diagnostic rules
 pkg/metallb/            MetalLB diagnostic rules
+pkg/netcap/             Network capture command and local pcap handling
 pkg/podinfo/            Pod, SSH, CRI, and network namespace rules
 pkg/prometheus/         Prometheus and Prometheus API diagnostic rules
 ```

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +32,16 @@ type sshRunner struct {
 	options SSHOptions
 }
 
+type StreamRunner interface {
+	RemoteRunner
+	Stream(ctx context.Context, address string, command string, stdout io.Writer) (string, error)
+}
+
 func NewSSHRunner(options SSHOptions) RemoteRunner {
+	return &sshRunner{options: options}
+}
+
+func NewSSHStreamRunner(options SSHOptions) StreamRunner {
 	return &sshRunner{options: options}
 }
 
@@ -86,6 +97,59 @@ func (runner *sshRunner) Run(ctx context.Context, address string, command string
 			return string(commandResult.output), fmt.Errorf("run %q: %w: %s", command, commandResult.err, string(commandResult.output))
 		}
 		return string(commandResult.output), nil
+	}
+}
+
+func (runner *sshRunner) Stream(ctx context.Context, address string, command string, stdout io.Writer) (string, error) {
+	if runner.options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, runner.options.Timeout)
+		defer cancel()
+	}
+	config, agentConnection, err := runner.clientConfig()
+	if err != nil {
+		return "", err
+	}
+	if agentConnection != nil {
+		defer agentConnection.Close()
+	}
+
+	dialer := net.Dialer{Timeout: runner.options.Timeout}
+	connection, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return "", fmt.Errorf("connect to %s: %w", address, err)
+	}
+	clientConnection, channels, requests, err := ssh.NewClientConn(connection, address, config)
+	if err != nil {
+		connection.Close()
+		return "", fmt.Errorf("SSH handshake with %s: %w", address, err)
+	}
+	client := ssh.NewClient(clientConnection, channels, requests)
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	var stderr strings.Builder
+	session.Stdout = stdout
+	session.Stderr = &stderr
+	resultChannel := make(chan error, 1)
+	go func() {
+		resultChannel <- session.Run(command)
+	}()
+
+	select {
+	case <-ctx.Done():
+		client.Close()
+		return stderr.String(), ctx.Err()
+	case runErr := <-resultChannel:
+		if runErr != nil {
+			return stderr.String(), fmt.Errorf("run %q: %w", command, runErr)
+		}
+		return stderr.String(), nil
 	}
 }
 

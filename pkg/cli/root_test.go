@@ -16,7 +16,7 @@ func TestRootCommandWithoutSubcommandShowsHelp(t *testing.T) {
 	if err := command.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	for _, expected := range []string{"Available Commands:", "amtool", "metallb", "podinfo", "prometheus"} {
+	for _, expected := range []string{"Available Commands:", "amtool", "metallb", "netcap", "podinfo", "prometheus"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("help output does not contain %q:\n%s", expected, output.String())
 		}
