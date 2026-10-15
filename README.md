@@ -1,6 +1,6 @@
 # kdig
 
-`kdig` is a Go-based kubectl plugin for diagnosing common MetalLB, Prometheus, and Alertmanager problems. Build the executable as `kubectl-dig`; kubectl exposes it as `kubectl dig` when the executable is on `PATH`.
+`kdig` is a Go-based kubectl plugin for diagnosing Kubernetes Pods and common MetalLB, Prometheus, and Alertmanager problems. Build the executable as `kubectl-dig`; kubectl exposes it as `kubectl dig` when the executable is on `PATH`.
 
 ## Build and install
 
@@ -29,7 +29,26 @@ Choose the component to diagnose:
 kubectl dig metallb --namespace metallb-system
 kubectl dig prometheus --namespace monitoring
 kubectl dig amtool --namespace monitoring
+kubectl dig podinfo api-0 --namespace apps
 ```
+
+Inspect a Pod and its node-side network namespace:
+
+```bash
+# Passwordless SSH as root using SSH Agent or a default private key.
+kubectl dig podinfo api-0 -n apps
+
+# Traverse every Pod in the namespace.
+kubectl dig podinfo -n apps
+
+# Explicit account and password.
+kubectl dig podinfo api-0 -n apps --username admin --password 'secret'
+
+# Explicit private key.
+kubectl dig podinfo api-0 -n apps --identity-file ~/.ssh/id_ed25519
+```
+
+`podinfo` reads the Pod and Node from Kubernetes, SSHes to the node IP, maps every Pod container using `crictl ps -a -o json`, and extracts the network PID with `crictl inspect`. It prints a ready-to-run command such as `nsenter -t 4242 -n`. SSH defaults to user `root`, port `22`, and passwordless authentication. Host keys are checked against `~/.ssh/known_hosts`; use `--insecure-skip-host-key` only in a controlled test environment. Supplying `--password` can expose the password through shell history or process inspection, so SSH Agent or `--identity-file` is preferred.
 
 The `amtool` command defaults to StatefulSet `alertmanager-main`, container `alertmanager`, and URL `http://localhost:9093`. Override them when the deployment uses different names:
 
@@ -87,6 +106,14 @@ Alertmanager `amtool` checks include:
 - routing trees, active or pending silences, and cluster peer status
 - differences in active alert counts between replicas
 
+Pod information checks include:
+
+- Pod name, phase, Pod IP, node name, and node IP
+- app, init, and ephemeral container names and Kubernetes container IDs
+- CRI container mapping and current runtime attempt
+- each container's network namespace PID and namespace identity
+- a ready-to-run `nsenter -t PID -n` command
+
 The active kubeconfig and context are used by default. Override them with `--kubeconfig` and `--context`.
 
 ## Project layout
@@ -97,10 +124,12 @@ pkg/cli/                root command assembly
 pkg/cli/common/         shared flags, clients, and report output
 pkg/cli/amtool/         Alertmanager amtool subcommand
 pkg/cli/metallb/        MetalLB subcommand
+pkg/cli/podinfo/        Pod and network namespace subcommand
 pkg/cli/prometheus/     Prometheus subcommand
 pkg/diagnostic/         findings, reports, output, and exit codes
 pkg/kube/               Kubernetes clients and shared health checks
 pkg/amtool/             Alertmanager amtool diagnostic rules
 pkg/metallb/            MetalLB diagnostic rules
+pkg/podinfo/            Pod, SSH, CRI, and network namespace rules
 pkg/prometheus/         Prometheus and Prometheus API diagnostic rules
 ```

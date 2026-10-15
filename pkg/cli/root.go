@@ -4,6 +4,7 @@ import (
 	amtoolcmd "github.com/andrewbytecoder/kdig/pkg/cli/amtool"
 	"github.com/andrewbytecoder/kdig/pkg/cli/common"
 	metallbcmd "github.com/andrewbytecoder/kdig/pkg/cli/metallb"
+	podinfocmd "github.com/andrewbytecoder/kdig/pkg/cli/podinfo"
 	prometheuscmd "github.com/andrewbytecoder/kdig/pkg/cli/prometheus"
 	"github.com/spf13/cobra"
 )
@@ -12,10 +13,11 @@ func NewRootCommand() *cobra.Command {
 	commonOptions := common.NewOptions()
 	amtoolOptions := amtoolcmd.NewOptions()
 	metalLBOptions := metallbcmd.NewOptions()
+	podInfoOptions := podinfocmd.NewOptions()
 	prometheusOptions := prometheuscmd.NewOptions()
 	command := &cobra.Command{
 		Use:           "kubectl-dig",
-		Short:         "Diagnose common Kubernetes add-on problems",
+		Short:         "Diagnose Kubernetes workloads and common add-on problems",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -27,6 +29,7 @@ func NewRootCommand() *cobra.Command {
 	commonOptions.AddFlags(command.PersistentFlags())
 	command.AddCommand(amtoolcmd.NewCommand(commonOptions, amtoolOptions))
 	command.AddCommand(metallbcmd.NewCommand(commonOptions, metalLBOptions))
+	command.AddCommand(podinfocmd.NewCommand(commonOptions, podInfoOptions))
 	command.AddCommand(prometheuscmd.NewCommand(commonOptions, prometheusOptions))
 	return command
 }
