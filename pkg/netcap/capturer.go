@@ -194,7 +194,7 @@ func (capturer *Capturer) Run(ctx context.Context) (report diagnostic.Report) {
 	if stats.Packets == 0 {
 		severity = diagnostic.SeverityWarning
 		summary = "No packets were captured; pcap contains only capture metadata"
-		suggestion = "Generate traffic while the capture is running, increase --duration, keep --interface any, and retry without filters. The tcpdump snapshot length is a per-packet limit, not the number of bytes captured."
+		suggestion = "Generate traffic while the capture is running, let it run longer or set --duration, keep --interface any, and retry without filters. The tcpdump snapshot length is a per-packet limit, not the number of bytes captured."
 	} else if interrupted {
 		severity = diagnostic.SeverityWarning
 		summary = "Packet capture interrupted; partial pcap saved to local file"
@@ -229,8 +229,8 @@ func ValidateCaptureOptions(options CaptureOptions) error {
 	if options.SnapLength < 0 {
 		return fmt.Errorf("snaplen cannot be negative")
 	}
-	if options.Duration <= 0 {
-		return fmt.Errorf("duration must be greater than zero")
+	if options.Duration < 0 {
+		return fmt.Errorf("duration cannot be negative")
 	}
 	for name, value := range map[string]string{
 		"interface": options.Interface,

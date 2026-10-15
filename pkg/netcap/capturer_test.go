@@ -154,6 +154,19 @@ func TestBuildCaptureCommandQuotesAdditionalFilter(t *testing.T) {
 	}
 }
 
+func TestBuildCaptureCommandWithoutDurationRunsUntilInterrupted(t *testing.T) {
+	command := BuildCaptureCommand(123, CaptureOptions{Interface: "any"})
+	if strings.Contains(command, "timeout") || strings.Contains(command, "sh -c") {
+		t.Fatalf("unlimited capture unexpectedly contains timeout wrapper: %s", command)
+	}
+	if !strings.HasPrefix(command, "nsenter -t 123 -n -- tcpdump") {
+		t.Fatalf("unexpected unlimited capture command: %s", command)
+	}
+	if err := ValidateCaptureOptions(CaptureOptions{Interface: "any"}); err != nil {
+		t.Fatalf("ValidateCaptureOptions() rejected unlimited capture: %v", err)
+	}
+}
+
 func TestValidateCaptureOptions(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -162,7 +175,7 @@ func TestValidateCaptureOptions(t *testing.T) {
 		{name: "bad protocol", options: CaptureOptions{Protocol: "http", Interface: "any", Duration: time.Second}},
 		{name: "bad port", options: CaptureOptions{Port: 70000, Interface: "any", Duration: time.Second}},
 		{name: "bad host", options: CaptureOptions{Host: "example.com;id", Interface: "any", Duration: time.Second}},
-		{name: "missing duration", options: CaptureOptions{Interface: "any"}},
+		{name: "negative duration", options: CaptureOptions{Interface: "any", Duration: -time.Second}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

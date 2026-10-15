@@ -45,7 +45,6 @@ func NewOptions() *Options {
 	return &Options{
 		Namespace:      "default",
 		Interface:      "any",
-		Duration:       30 * time.Second,
 		Username:       "root",
 		KnownHostsFile: defaultKnownHostsFile(),
 		SSHPort:        22,
@@ -82,9 +81,9 @@ func NewCommand(commonOptions *common.Options, options *Options) *cobra.Command 
 	flags.StringVar(&options.SourceHost, "src-host", options.SourceHost, "Source host")
 	flags.StringVar(&options.DestinationHost, "dst-host", options.DestinationHost, "Destination host")
 	flags.StringVarP(&options.Interface, "interface", "i", options.Interface, "Interface inside the Pod network namespace")
-	flags.IntVarP(&options.Count, "count", "c", options.Count, "Stop after this many packets; zero relies on duration")
+	flags.IntVarP(&options.Count, "count", "c", options.Count, "Stop after this many packets; zero runs until Ctrl+C or duration")
 	flags.IntVarP(&options.SnapLength, "snaplen", "s", options.SnapLength, "Capture bytes per packet; zero uses tcpdump default")
-	flags.DurationVar(&options.Duration, "duration", options.Duration, "Maximum capture duration")
+	flags.DurationVar(&options.Duration, "duration", options.Duration, "Maximum capture duration; zero runs until Ctrl+C")
 	flags.StringVar(&options.Filter, "filter", options.Filter, "Additional tcpdump BPF expression")
 	flags.BoolVar(&options.Overwrite, "overwrite", options.Overwrite, "Replace an existing local pcap file")
 	flags.StringVarP(&options.Username, "username", "u", options.Username, "SSH username")
@@ -116,17 +115,13 @@ func (options *Options) Validate() error {
 }
 
 func (options *Options) Report(ctx context.Context, clients *kube.Clients, requestTimeout time.Duration) diagnostic.Report {
-	captureTimeout := requestTimeout
-	if options.Duration > 0 {
-		captureTimeout += options.Duration
-	}
 	runner := podinfo.NewSSHStreamRunner(podinfo.SSHOptions{
 		Username:            options.Username,
 		Password:            options.Password,
 		IdentityFile:        options.IdentityFile,
 		KnownHostsFile:      options.KnownHostsFile,
 		InsecureSkipHostKey: options.InsecureSkipHostKey,
-		Timeout:             captureTimeout,
+		Timeout:             requestTimeout,
 	})
 	return netcapdiagnostic.NewCapturer(clients, runner, netcapdiagnostic.Options{
 		Namespace:      options.Namespace,

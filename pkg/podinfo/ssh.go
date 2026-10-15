@@ -101,11 +101,6 @@ func (runner *sshRunner) Run(ctx context.Context, address string, command string
 }
 
 func (runner *sshRunner) Stream(ctx context.Context, address string, command string, stdout io.Writer) (string, error) {
-	if runner.options.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, runner.options.Timeout)
-		defer cancel()
-	}
 	config, agentConnection, err := runner.clientConfig()
 	if err != nil {
 		return "", err

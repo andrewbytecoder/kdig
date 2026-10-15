@@ -1,16 +1,13 @@
 package netcap
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
 func TestDefaultOptions(t *testing.T) {
 	options := NewOptions()
 	if options.Namespace != "default" || options.Username != "root" || options.SSHPort != 22 {
 		t.Fatalf("unexpected SSH defaults: %#v", options)
 	}
-	if options.Interface != "any" || options.Duration != 30*time.Second {
+	if options.Interface != "any" || options.Duration != 0 {
 		t.Fatalf("unexpected capture defaults: %#v", options)
 	}
 }
