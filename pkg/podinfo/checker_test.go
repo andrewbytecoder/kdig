@@ -59,8 +59,8 @@ func TestCheckerInspectsAllPodContainers(t *testing.T) {
 	if report.Target != "podinfo" || report.Namespace != "apps" {
 		t.Fatalf("unexpected report identity: %#v", report)
 	}
-	if got := runner.callCount(); got != 6 {
-		t.Fatalf("remote command count = %d, want 6", got)
+	if got := runner.callCount(); got != 5 {
+		t.Fatalf("remote command count = %d, want 5", got)
 	}
 	if findingCount(report.Findings, "network-namespace", diagnostic.SeverityInfo) != 2 {
 		t.Fatalf("expected network namespace details for two containers: %#v", report.Findings)
@@ -108,8 +108,8 @@ func TestCheckerTraversesAllPodsWhenPodNameIsEmpty(t *testing.T) {
 			t.Fatalf("namespace traversal findings do not contain %q: %#v", expected, report.Findings)
 		}
 	}
-	if got := runner.callCount(); got != 8 {
-		t.Fatalf("remote command count = %d, want 8", got)
+	if got := runner.callCount(); got != 5 {
+		t.Fatalf("remote command count = %d, want 5", got)
 	}
 }
 

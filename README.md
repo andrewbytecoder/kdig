@@ -48,7 +48,7 @@ kubectl dig podinfo api-0 -n apps --username admin --password 'secret'
 kubectl dig podinfo api-0 -n apps --identity-file ~/.ssh/id_ed25519
 ```
 
-`podinfo` reads the Pod and Node from Kubernetes, SSHes to the node IP, maps every Pod container using `crictl ps -a -o json`, and extracts the network PID with `crictl inspect`. It prints a ready-to-run command such as `nsenter -t 4242 -n`. SSH defaults to user `root`, port `22`, and passwordless authentication. Host keys are checked against `~/.ssh/known_hosts`; use `--insecure-skip-host-key` only in a controlled test environment. Supplying `--password` can expose the password through shell history or process inspection, so SSH Agent or `--identity-file` is preferred.
+`podinfo` reads the Pod and Node from Kubernetes, SSHes to the node IP, maps every Pod container using `crictl ps -a -o json`, and extracts the network PID with `crictl inspect`. It prints a ready-to-run command such as `nsenter -t 4242 -n`. SSH defaults to user `root`, port `22`, and passwordless authentication. Host keys use OpenSSH-style `accept-new`: unknown keys are appended to `~/.ssh/known_hosts`, while changed fingerprints are rejected. Use `--insecure-skip-host-key` only in a controlled test environment. Supplying `--password` can expose the password through shell history or process inspection, so SSH Agent or `--identity-file` is preferred.
 
 The `amtool` command defaults to StatefulSet `alertmanager-main`, container `alertmanager`, and URL `http://localhost:9093`. Override them when the deployment uses different names:
 

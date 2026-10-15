@@ -7,12 +7,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+var knownHostsMutex sync.Mutex
 
 type SSHOptions struct {
 	Username            string
@@ -167,9 +170,66 @@ func (runner *sshRunner) hostKeyCallback() (ssh.HostKeyCallback, error) {
 	if runner.options.KnownHostsFile == "" {
 		return nil, errors.New("known_hosts file is required unless insecure host key checking is enabled")
 	}
+	if err := ensureKnownHostsFile(runner.options.KnownHostsFile); err != nil {
+		return nil, err
+	}
 	callback, err := knownhosts.New(runner.options.KnownHostsFile)
 	if err != nil {
 		return nil, fmt.Errorf("load known_hosts file %s: %w", runner.options.KnownHostsFile, err)
 	}
-	return callback, nil
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := callback(hostname, remote, key)
+		if err == nil {
+			return nil
+		}
+		var keyError *knownhosts.KeyError
+		if !errors.As(err, &keyError) || len(keyError.Want) > 0 {
+			return err
+		}
+		return acceptNewHostKey(runner.options.KnownHostsFile, hostname, remote, key)
+	}, nil
+}
+
+func ensureKnownHostsFile(path string) error {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create known_hosts directory %s: %w", directory, err)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("create known_hosts file %s: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close known_hosts file %s: %w", path, err)
+	}
+	return nil
+}
+
+func acceptNewHostKey(path string, hostname string, remote net.Addr, key ssh.PublicKey) error {
+	knownHostsMutex.Lock()
+	defer knownHostsMutex.Unlock()
+
+	callback, err := knownhosts.New(path)
+	if err != nil {
+		return fmt.Errorf("reload known_hosts file %s: %w", path, err)
+	}
+	if err := callback(hostname, remote, key); err == nil {
+		return nil
+	} else {
+		var keyError *knownhosts.KeyError
+		if !errors.As(err, &keyError) || len(keyError.Want) > 0 {
+			return err
+		}
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("open known_hosts file %s: %w", path, err)
+	}
+	defer file.Close()
+	line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
+	if _, err := fmt.Fprintln(file, line); err != nil {
+		return fmt.Errorf("save host key for %s: %w", hostname, err)
+	}
+	return nil
 }

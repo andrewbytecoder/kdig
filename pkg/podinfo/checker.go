@@ -33,9 +33,23 @@ type RemoteRunner interface {
 }
 
 type Checker struct {
-	clients *kube.Clients
-	options Options
-	runner  RemoteRunner
+	clients        *kube.Clients
+	options        Options
+	runner         RemoteRunner
+	runtimeCache   map[string]nodeRuntime
+	namespaceCache map[string]namespaceResult
+}
+
+type nodeRuntime struct {
+	version          string
+	containersOutput string
+	versionErr       error
+	containersErr    error
+}
+
+type namespaceResult struct {
+	identity string
+	err      error
 }
 
 func NewChecker(clients *kube.Clients, options Options, runner RemoteRunner) *Checker {
@@ -61,7 +75,13 @@ func NewChecker(clients *kube.Clients, options Options, runner RemoteRunner) *Ch
 			Timeout:             options.Timeout,
 		})
 	}
-	return &Checker{clients: clients, options: options, runner: runner}
+	return &Checker{
+		clients:        clients,
+		options:        options,
+		runner:         runner,
+		runtimeCache:   make(map[string]nodeRuntime),
+		namespaceCache: make(map[string]namespaceResult),
+	}
 }
 
 func (checker *Checker) Run(ctx context.Context) (report diagnostic.Report) {
@@ -169,25 +189,24 @@ func (checker *Checker) inspectPod(ctx context.Context, report *diagnostic.Repor
 
 	checker.addKubernetesInfo(report, *pod, *node, nodeIP)
 	address := net.JoinHostPort(nodeIP, strconv.Itoa(checker.options.SSHPort))
-	version, err := checker.runner.Run(ctx, address, "crictl --version")
-	if err != nil {
-		report.Add(remoteFailure("ssh", diagnostic.Resource("node", "", node.Name), "Cannot execute crictl on node", err))
+	runtime := checker.nodeRuntime(ctx, address)
+	if runtime.versionErr != nil {
+		report.Add(remoteFailure("ssh", diagnostic.Resource("node", "", node.Name), "Cannot execute crictl on node", runtime.versionErr))
 		return
 	}
 	report.Add(diagnostic.Finding{
 		Severity: diagnostic.SeverityInfo,
 		Check:    "runtime",
 		Resource: diagnostic.Resource("node", "", node.Name),
-		Summary:  firstLine(version),
+		Summary:  firstLine(runtime.version),
 		Detail:   fmt.Sprintf("SSH: %s@%s", checker.options.Username, address),
 	})
 
-	containersOutput, err := checker.runner.Run(ctx, address, "crictl ps -a -o json")
-	if err != nil {
-		report.Add(remoteFailure("runtime", diagnostic.Resource("node", "", node.Name), "Cannot list CRI containers", err))
+	if runtime.containersErr != nil {
+		report.Add(remoteFailure("runtime", diagnostic.Resource("node", "", node.Name), "Cannot list CRI containers", runtime.containersErr))
 		return
 	}
-	containers, err := selectPodContainers(containersOutput, *pod)
+	containers, err := selectPodContainers(runtime.containersOutput, *pod)
 	if err != nil {
 		report.Add(diagnostic.Finding{
 			Severity:   diagnostic.SeverityCritical,
@@ -285,9 +304,9 @@ func (checker *Checker) inspectContainers(
 			continue
 		}
 
-		namespaceID, namespaceErr := checker.runner.Run(ctx, address, fmt.Sprintf("readlink /proc/%d/ns/net", pid))
-		namespaceID = strings.TrimSpace(namespaceID)
-		if namespaceErr != nil {
+		namespace := checker.networkNamespace(ctx, address, pid)
+		namespaceID := namespace.identity
+		if namespace.err != nil {
 			namespaceID = "unknown"
 		}
 		namespaces[namespaceID] = append(namespaces[namespaceID], container.Metadata.Name)
@@ -328,6 +347,30 @@ func (checker *Checker) inspectContainers(
 			Suggestion: "Re-run crictl inspect and readlink manually; terminated containers may reference stale namespaces.",
 		})
 	}
+}
+
+func (checker *Checker) nodeRuntime(ctx context.Context, address string) nodeRuntime {
+	if cached, exists := checker.runtimeCache[address]; exists {
+		return cached
+	}
+	runtime := nodeRuntime{}
+	runtime.version, runtime.versionErr = checker.runner.Run(ctx, address, "crictl --version")
+	if runtime.versionErr == nil {
+		runtime.containersOutput, runtime.containersErr = checker.runner.Run(ctx, address, "crictl ps -a -o json")
+	}
+	checker.runtimeCache[address] = runtime
+	return runtime
+}
+
+func (checker *Checker) networkNamespace(ctx context.Context, address string, pid int) namespaceResult {
+	key := fmt.Sprintf("%s/%d", address, pid)
+	if cached, exists := checker.namespaceCache[key]; exists {
+		return cached
+	}
+	identity, err := checker.runner.Run(ctx, address, fmt.Sprintf("readlink /proc/%d/ns/net", pid))
+	result := namespaceResult{identity: strings.TrimSpace(identity), err: err}
+	checker.namespaceCache[key] = result
+	return result
 }
 
 type namedContainer struct {
@@ -425,6 +468,6 @@ func remoteFailure(check, resource, summary string, err error) diagnostic.Findin
 		Resource:   resource,
 		Summary:    summary,
 		Detail:     err.Error(),
-		Suggestion: "Verify SSH connectivity, authentication, known_hosts, node permissions, and crictl configuration.",
+		Suggestion: "Verify SSH connectivity, authentication, known_hosts permissions or fingerprint conflicts, node permissions, and crictl configuration.",
 	}
 }

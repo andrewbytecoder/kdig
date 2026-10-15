@@ -59,7 +59,7 @@ func NewCommand(commonOptions *common.Options, options *Options) *cobra.Command 
 	flags.StringVarP(&options.Username, "username", "u", options.Username, "SSH username")
 	flags.StringVar(&options.Password, "password", options.Password, "SSH password; empty uses SSH agent or private key (may be visible in shell history)")
 	flags.StringVarP(&options.IdentityFile, "identity-file", "i", options.IdentityFile, "SSH private key file")
-	flags.StringVar(&options.KnownHostsFile, "known-hosts", options.KnownHostsFile, "SSH known_hosts file")
+	flags.StringVar(&options.KnownHostsFile, "known-hosts", options.KnownHostsFile, "SSH known_hosts file; unknown host keys are added automatically")
 	flags.IntVar(&options.SSHPort, "ssh-port", options.SSHPort, "SSH port")
 	flags.BoolVar(&options.InsecureSkipHostKey, "insecure-skip-host-key", options.InsecureSkipHostKey, "Skip SSH host key verification")
 	return command
