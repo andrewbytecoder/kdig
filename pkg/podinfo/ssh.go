@@ -143,7 +143,13 @@ func (runner *sshRunner) Stream(ctx context.Context, address string, command str
 
 	select {
 	case <-ctx.Done():
-		client.Close()
+		_ = session.Signal(ssh.SIGINT)
+		select {
+		case <-resultChannel:
+		case <-time.After(2 * time.Second):
+			client.Close()
+			<-resultChannel
+		}
 		return stderr.String(), ctx.Err()
 	case runErr := <-resultChannel:
 		if runErr != nil {

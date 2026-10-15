@@ -142,19 +142,32 @@ func (capturer *Capturer) Run(ctx context.Context) (report diagnostic.Report) {
 		report.Add(failure("capture", diagnostic.Resource("pod", target.Namespace, target.Pod), "Capture did not produce a valid pcap header", fmt.Errorf("received %d bytes", info.Size())))
 		return
 	}
+	if _, err := temporary.Seek(0, 0); err != nil {
+		report.Add(failure("local-output", absOutput, "Cannot read temporary pcap file", err))
+		return
+	}
+	stats, err := ParseCapture(temporary)
+	if err != nil {
+		report.Add(failure("capture", diagnostic.Resource("pod", target.Namespace, target.Pod), "Capture output is not a valid pcap file", err))
+		return
+	}
 	if err := temporary.Close(); err != nil {
 		report.Add(failure("local-output", absOutput, "Cannot close temporary pcap file", err))
 		return
 	}
-	if capturer.options.Overwrite {
-		if err := os.Remove(absOutput); err != nil && !os.IsNotExist(err) {
-			report.Add(failure("local-output", absOutput, "Cannot replace existing pcap file", err))
+	if err := os.Rename(temporaryName, absOutput); err != nil {
+		if !capturer.options.Overwrite {
+			report.Add(failure("local-output", absOutput, "Cannot finalize local pcap file", err))
 			return
 		}
-	}
-	if err := os.Rename(temporaryName, absOutput); err != nil {
-		report.Add(failure("local-output", absOutput, "Cannot finalize local pcap file", err))
-		return
+		if removeErr := os.Remove(absOutput); removeErr != nil && !os.IsNotExist(removeErr) {
+			report.Add(failure("local-output", absOutput, "Cannot replace existing pcap file", removeErr))
+			return
+		}
+		if retryErr := os.Rename(temporaryName, absOutput); retryErr != nil {
+			report.Add(failure("local-output", absOutput, "Cannot finalize local pcap file", retryErr))
+			return
+		}
 	}
 	completed = true
 
@@ -166,6 +179,9 @@ func (capturer *Capturer) Run(ctx context.Context) (report diagnostic.Report) {
 		"Network PID: " + strconv.Itoa(target.NetworkPID),
 		"Network namespace: " + target.NetworkNamespace,
 		"Local pcap: " + absOutput,
+		"Capture format: " + stats.Format,
+		"Packets captured: " + strconv.Itoa(stats.Packets),
+		"Packet payload bytes: " + strconv.FormatInt(stats.PayloadBytes, 10),
 		"Bytes written: " + strconv.FormatInt(info.Size(), 10),
 		"Remote command: " + command,
 	}
@@ -174,16 +190,22 @@ func (capturer *Capturer) Run(ctx context.Context) (report diagnostic.Report) {
 	}
 	severity := diagnostic.SeverityInfo
 	summary := "Packet capture saved to local file"
-	if interrupted {
+	suggestion := ""
+	if stats.Packets == 0 {
+		severity = diagnostic.SeverityWarning
+		summary = "No packets were captured; pcap contains only capture metadata"
+		suggestion = "Generate traffic while the capture is running, increase --duration, keep --interface any, and retry without filters. The tcpdump snapshot length is a per-packet limit, not the number of bytes captured."
+	} else if interrupted {
 		severity = diagnostic.SeverityWarning
 		summary = "Packet capture interrupted; partial pcap saved to local file"
 	}
 	report.Add(diagnostic.Finding{
-		Severity: severity,
-		Check:    "capture",
-		Resource: diagnostic.Resource("pod", target.Namespace, target.Pod),
-		Summary:  summary,
-		Detail:   strings.Join(detail, "\n"),
+		Severity:   severity,
+		Check:      "capture",
+		Resource:   diagnostic.Resource("pod", target.Namespace, target.Pod),
+		Summary:    summary,
+		Detail:     strings.Join(detail, "\n"),
+		Suggestion: suggestion,
 	})
 	return
 }

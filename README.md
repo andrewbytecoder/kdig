@@ -53,7 +53,7 @@ kubectl dig netcap -n apps --pod api-0 \
   --filter 'tcp[tcpflags] & tcp-syn != 0' -w syn.pcap
 ```
 
-`netcap` resolves the Pod network PID using the same CRI inspection as `podinfo`, runs `nsenter -t PID -n -- tcpdump` on the node, and streams pcap bytes over SSH directly into the local file. The default output is `POD.pcap`; existing files are protected unless `--overwrite` is specified. Ctrl+C preserves a partial pcap when a valid pcap header was received. The node must provide `crictl`, `nsenter`, `tcpdump`, and GNU `timeout`, and the SSH account must have permission to inspect the runtime and capture packets.
+`netcap` resolves the Pod network PID using the same CRI inspection as `podinfo`, runs `nsenter -t PID -n -- tcpdump` on the node, and streams pcap bytes over SSH directly into the local file. The default output is `POD.pcap`; existing files are protected unless `--overwrite` is specified. Ctrl+C asks tcpdump to flush and preserves a partial pcap when a valid pcap header was received. The result reports the actual packet count parsed from the pcap file. A tcpdump message such as `snapshot length 262144 bytes` is only the maximum bytes retained per packet, not the amount captured. The node must provide `crictl`, `nsenter`, `tcpdump`, and GNU `timeout`, and the SSH account must have permission to inspect the runtime and capture packets.
 
 Inspect a Pod and its node-side network namespace:
 

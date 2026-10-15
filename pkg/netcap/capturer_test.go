@@ -114,6 +114,31 @@ func TestCapturerSavesPartialPcapWhenInterrupted(t *testing.T) {
 	}
 }
 
+func TestCapturerReportsHeaderOnlyPcapAsEmpty(t *testing.T) {
+	outputFile := filepath.Join(t.TempDir(), "empty.pcap")
+	runner := &fakeStreamRunner{pcap: testPcapHeader()}
+	capturer := NewCapturer(testClients(), runner, Options{
+		Namespace:  "apps",
+		Pod:        "api-0",
+		OutputFile: outputFile,
+		CaptureOptions: CaptureOptions{
+			Interface: "any",
+			Duration:  time.Second,
+		},
+	})
+
+	report := capturer.Run(context.Background())
+
+	if report.ExitCode() != 1 {
+		t.Fatalf("ExitCode() = %d, want warning exit code 1", report.ExitCode())
+	}
+	for _, expected := range []string{"No packets were captured", "Packets captured: 0", "snapshot length is a per-packet limit"} {
+		if !findingsContain(report.Findings, expected) {
+			t.Fatalf("empty capture report does not contain %q: %#v", expected, report.Findings)
+		}
+	}
+}
+
 func TestBuildCaptureCommandQuotesAdditionalFilter(t *testing.T) {
 	options := CaptureOptions{
 		Interface: "eth0",
@@ -197,6 +222,18 @@ func testClients() *kube.Clients {
 }
 
 func testPcap() []byte {
+	data := append([]byte{}, testPcapHeader()...)
+	data = append(data,
+		0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00,
+		0x04, 0x00, 0x00, 0x00,
+		0x04, 0x00, 0x00, 0x00,
+		0xde, 0xad, 0xbe, 0xef,
+	)
+	return data
+}
+
+func testPcapHeader() []byte {
 	return []byte{
 		0xd4, 0xc3, 0xb2, 0xa1,
 		0x02, 0x00, 0x04, 0x00,
@@ -209,7 +246,7 @@ func testPcap() []byte {
 
 func findingsContain(findings []diagnostic.Finding, expected string) bool {
 	for _, finding := range findings {
-		if strings.Contains(finding.Resource, expected) || strings.Contains(finding.Summary, expected) || strings.Contains(finding.Detail, expected) {
+		if strings.Contains(finding.Resource, expected) || strings.Contains(finding.Summary, expected) || strings.Contains(finding.Detail, expected) || strings.Contains(finding.Suggestion, expected) {
 			return true
 		}
 	}
