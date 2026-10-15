@@ -30,6 +30,14 @@ kubectl dig metallb --namespace metallb-system
 kubectl dig prometheus --namespace monitoring
 ```
 
+MetalLB BGP checks execute `vtysh` in each speaker's FRR container. The defaults are namespace `metallb-system` and container `frr`; both can be overridden:
+
+```bash
+kubectl dig metallb --namespace metallb-system --frr-container frr
+```
+
+The caller needs permission to list cluster resources and create `pods/exec` requests in the MetalLB namespace.
+
 Add Prometheus API checks for readiness, unhealthy scrape targets, and failing rules:
 
 ```bash
@@ -47,6 +55,7 @@ MetalLB checks include:
 - unhealthy, pending, or frequently restarting pods
 - IPAddressPool, L2Advertisement, BGPAdvertisement, and BGPPeer configuration
 - pending LoadBalancer services, missing address pools, and services without ready endpoints
+- FRR BGP summaries, neighbor state, IPv4 routes, and per-neighbor advertised routes
 - webhook endpoints and recent warning events
 
 Prometheus checks include:

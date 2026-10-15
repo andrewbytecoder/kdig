@@ -14,14 +14,16 @@ import (
 )
 
 type Options struct {
-	Namespace  string
-	PendingFor time.Duration
+	Namespace    string
+	PendingFor   time.Duration
+	FRRContainer string
 }
 
 func NewOptions() *Options {
 	return &Options{
-		Namespace:  "metallb-system",
-		PendingFor: 2 * time.Minute,
+		Namespace:    "metallb-system",
+		PendingFor:   2 * time.Minute,
+		FRRContainer: "frr",
 	}
 }
 
@@ -48,24 +50,30 @@ func NewCommand(commonOptions *common.Options, options *Options) *cobra.Command 
 func (options *Options) AddRootFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&options.Namespace, "metallb-namespace", options.Namespace, "MetalLB namespace")
 	flags.DurationVar(&options.PendingFor, "pending-for", options.PendingFor, "Ignore newer LoadBalancer services without an external address")
+	flags.StringVar(&options.FRRContainer, "frr-container", options.FRRContainer, "FRR container name in MetalLB speaker pods")
 }
 
 func (options *Options) AddCommandFlags(flags *pflag.FlagSet) {
 	flags.StringVarP(&options.Namespace, "namespace", "n", options.Namespace, "MetalLB namespace")
 	flags.DurationVar(&options.PendingFor, "pending-for", options.PendingFor, "Ignore newer LoadBalancer services without an external address")
+	flags.StringVar(&options.FRRContainer, "frr-container", options.FRRContainer, "FRR container name in MetalLB speaker pods")
 }
 
 func (options *Options) Validate() error {
 	if options.PendingFor < 0 {
 		return fmt.Errorf("pending-for cannot be negative")
 	}
+	if options.FRRContainer == "" {
+		return fmt.Errorf("frr-container cannot be empty")
+	}
 	return nil
 }
 
 func (options *Options) Report(ctx context.Context, clients *kube.Clients, eventSince time.Duration) diagnostic.Report {
 	return metallbdiagnostic.NewChecker(clients, metallbdiagnostic.Options{
-		Namespace:  options.Namespace,
-		EventSince: eventSince,
-		PendingFor: options.PendingFor,
+		Namespace:    options.Namespace,
+		EventSince:   eventSince,
+		PendingFor:   options.PendingFor,
+		FRRContainer: options.FRRContainer,
 	}).Run(ctx)
 }

@@ -12,19 +12,27 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func (checker *Checker) checkLoadBalancerServices(ctx context.Context, report *diagnostic.Report, pools map[string]struct{}) {
+func (checker *Checker) checkLoadBalancerServices(ctx context.Context, report *diagnostic.Report, pools map[string]struct{}) []string {
 	services, err := checker.clients.Kubernetes.CoreV1().Services(corev1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		report.Add(apiFailure("loadbalancer-services", "list services", err))
-		return
+		return nil
 	}
 	count := 0
+	addresses := make([]string, 0)
 	for _, service := range services.Items {
 		if service.Spec.Type != corev1.ServiceTypeLoadBalancer {
 			continue
 		}
 		count++
 		resource := diagnostic.Resource("service", service.Namespace, service.Name)
+		for _, ingress := range service.Status.LoadBalancer.Ingress {
+			if ingress.IP != "" {
+				addresses = append(addresses, ingress.IP)
+			} else if ingress.Hostname != "" {
+				addresses = append(addresses, ingress.Hostname)
+			}
+		}
 		if len(service.Status.LoadBalancer.Ingress) == 0 && time.Since(service.CreationTimestamp.Time) >= checker.options.PendingFor {
 			report.Add(diagnostic.Finding{
 				Severity:   diagnostic.SeverityCritical,
@@ -50,6 +58,22 @@ func (checker *Checker) checkLoadBalancerServices(ctx context.Context, report *d
 				})
 			}
 		}
+		externalAddress := strings.Join(serviceExternalAddresses(service), ", ")
+		if externalAddress == "" {
+			externalAddress = "<pending>"
+		}
+		report.Add(diagnostic.Finding{
+			Severity: diagnostic.SeverityInfo,
+			Check:    "loadbalancer-services",
+			Resource: resource,
+			Summary:  "External address: " + externalAddress,
+			Detail: detailLines(
+				"Cluster IP", service.Spec.ClusterIP,
+				"Ports", servicePorts(service),
+				"Address pool", poolName,
+				"External traffic policy", string(service.Spec.ExternalTrafficPolicy),
+			),
+		})
 		if len(service.Spec.Selector) == 0 {
 			continue
 		}
@@ -67,6 +91,31 @@ func (checker *Checker) checkLoadBalancerServices(ctx context.Context, report *d
 		}
 	}
 	report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "loadbalancer-services", Summary: fmt.Sprintf("Inspected %d LoadBalancer services", count)})
+	return addresses
+}
+
+func serviceExternalAddresses(service corev1.Service) []string {
+	addresses := make([]string, 0, len(service.Status.LoadBalancer.Ingress))
+	for _, ingress := range service.Status.LoadBalancer.Ingress {
+		if ingress.IP != "" {
+			addresses = append(addresses, ingress.IP)
+		} else if ingress.Hostname != "" {
+			addresses = append(addresses, ingress.Hostname)
+		}
+	}
+	return addresses
+}
+
+func servicePorts(service corev1.Service) string {
+	ports := make([]string, 0, len(service.Spec.Ports))
+	for _, port := range service.Spec.Ports {
+		value := fmt.Sprintf("%d/%s", port.Port, port.Protocol)
+		if port.NodePort != 0 {
+			value += fmt.Sprintf(" (node %d)", port.NodePort)
+		}
+		ports = append(ports, value)
+	}
+	return strings.Join(ports, ", ")
 }
 
 func (checker *Checker) readyEndpoints(ctx context.Context, service corev1.Service) (int, error) {

@@ -3,8 +3,6 @@ package metallb
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/andrewbytecoder/kdig/pkg/diagnostic"
@@ -16,6 +14,7 @@ import (
 )
 
 var (
+	crdResource         = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
 	addressPoolResource = schema.GroupVersionResource{Group: "metallb.io", Version: "v1beta1", Resource: "ipaddresspools"}
 	l2Resource          = schema.GroupVersionResource{Group: "metallb.io", Version: "v1beta1", Resource: "l2advertisements"}
 	bgpResource         = schema.GroupVersionResource{Group: "metallb.io", Version: "v1beta1", Resource: "bgpadvertisements"}
@@ -23,9 +22,10 @@ var (
 )
 
 type Options struct {
-	Namespace  string
-	EventSince time.Duration
-	PendingFor time.Duration
+	Namespace    string
+	EventSince   time.Duration
+	PendingFor   time.Duration
+	FRRContainer string
 }
 
 type Checker struct {
@@ -34,6 +34,12 @@ type Checker struct {
 }
 
 func NewChecker(clients *kube.Clients, options Options) *Checker {
+	if options.Namespace == "" {
+		options.Namespace = "metallb-system"
+	}
+	if options.FRRContainer == "" {
+		options.FRRContainer = "frr"
+	}
 	return &Checker{clients: clients, options: options}
 }
 
@@ -64,8 +70,12 @@ func (checker *Checker) Run(ctx context.Context) (report diagnostic.Report) {
 	checker.checkController(ctx, &report)
 	checker.checkSpeaker(ctx, &report)
 	checker.checkPods(ctx, &report)
-	pools := checker.checkConfiguration(ctx, &report)
-	checker.checkLoadBalancerServices(ctx, &report, pools)
+	configuration := checker.checkConfiguration(ctx, &report)
+	serviceAddresses := checker.checkLoadBalancerServices(ctx, &report, configuration.pools)
+	if configuration.bgpEnabled {
+		checker.checkBGPSessions(ctx, &report)
+		checker.addNetworkSuggestions(&report, serviceAddresses, configuration.peerAddresses)
+	}
 	checker.checkWebhook(ctx, &report)
 	checker.checkEvents(ctx, &report)
 	return
@@ -163,6 +173,23 @@ func (checker *Checker) checkPods(ctx context.Context, report *diagnostic.Report
 			continue
 		}
 		matched++
+		readyContainers := 0
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.Ready {
+				readyContainers++
+			}
+		}
+		report.Add(diagnostic.Finding{
+			Severity: diagnostic.SeverityInfo,
+			Check:    "pods",
+			Resource: diagnostic.Resource("pod", pod.Namespace, pod.Name),
+			Summary:  fmt.Sprintf("Phase %s, ready containers %d/%d", pod.Status.Phase, readyContainers, len(pod.Spec.Containers)),
+			Detail: detailLines(
+				"Node", pod.Spec.NodeName,
+				"Pod IP", pod.Status.PodIP,
+				"Host IP", pod.Status.HostIP,
+			),
+		})
 		for _, finding := range kube.PodFindings(pod, "pods") {
 			report.Add(finding)
 		}
@@ -170,74 +197,6 @@ func (checker *Checker) checkPods(ctx context.Context, report *diagnostic.Report
 	if matched > 0 {
 		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "pods", Summary: fmt.Sprintf("Inspected %d MetalLB pods", matched)})
 	}
-}
-
-func (checker *Checker) checkConfiguration(ctx context.Context, report *diagnostic.Report) map[string]struct{} {
-	pools := make(map[string]struct{})
-	poolList, err := checker.clients.Dynamic.Resource(addressPoolResource).Namespace(checker.options.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		report.Add(diagnostic.Finding{
-			Severity:   diagnostic.SeverityCritical,
-			Check:      "configuration",
-			Resource:   "ipaddresspools.metallb.io",
-			Summary:    "Cannot read MetalLB IPAddressPool resources",
-			Detail:     err.Error(),
-			Suggestion: "Verify MetalLB CRDs are installed and RBAC allows listing IPAddressPools.",
-		})
-		return pools
-	}
-	for _, pool := range poolList.Items {
-		pools[pool.GetName()] = struct{}{}
-	}
-	if len(pools) == 0 {
-		report.Add(diagnostic.Finding{
-			Severity:   diagnostic.SeverityCritical,
-			Check:      "configuration",
-			Resource:   "ipaddresspools.metallb.io",
-			Summary:    "No IPAddressPool is configured",
-			Suggestion: "Create an IPAddressPool containing addresses reachable on the local network.",
-		})
-	} else {
-		names := make([]string, 0, len(pools))
-		for name := range pools {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "configuration", Resource: "ipaddresspools.metallb.io", Summary: fmt.Sprintf("Found %d address pools: %s", len(names), strings.Join(names, ", "))})
-	}
-
-	l2Count := checker.countOptionalResources(ctx, report, l2Resource)
-	bgpCount := checker.countOptionalResources(ctx, report, bgpResource)
-	peerCount := checker.countOptionalResources(ctx, report, bgpPeerResource)
-	if l2Count == 0 && bgpCount == 0 {
-		report.Add(diagnostic.Finding{
-			Severity:   diagnostic.SeverityWarning,
-			Check:      "configuration",
-			Summary:    "No L2Advertisement or BGPAdvertisement is configured",
-			Suggestion: "Create an advertisement matching the address pool and intended network mode.",
-		})
-	}
-	if bgpCount > 0 && peerCount == 0 {
-		report.Add(diagnostic.Finding{
-			Severity:   diagnostic.SeverityWarning,
-			Check:      "configuration",
-			Resource:   "bgpadvertisements.metallb.io",
-			Summary:    "BGP advertisements exist but no BGPPeer was found",
-			Suggestion: "Configure at least one BGPPeer or verify peer resources in this namespace.",
-		})
-	}
-	return pools
-}
-
-func (checker *Checker) countOptionalResources(ctx context.Context, report *diagnostic.Report, resource schema.GroupVersionResource) int {
-	list, err := checker.clients.Dynamic.Resource(resource).Namespace(checker.options.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			report.Add(diagnostic.Finding{Severity: diagnostic.SeverityWarning, Check: "configuration", Resource: resource.Resource + "." + resource.Group, Summary: "Cannot inspect optional MetalLB resources", Detail: err.Error()})
-		}
-		return 0
-	}
-	return len(list.Items)
 }
 
 func apiFailure(check, operation string, err error) diagnostic.Finding {

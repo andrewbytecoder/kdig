@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
 func Write(writer io.Writer, report Report, format string) error {
@@ -32,7 +33,18 @@ func writeTable(writer io.Writer, report Report) error {
 		return err
 	}
 
-	table := tablewriter.NewWriter(writer)
+	table := tablewriter.NewTable(writer, tablewriter.WithConfig(tablewriter.Config{
+		Row: tw.CellConfig{
+			Alignment: tw.CellAlignment{Global: tw.AlignLeft},
+			ColMaxWidths: tw.CellWidth{PerColumn: tw.Mapper[int, int]{
+				0: 10,
+				1: 24,
+				2: 36,
+				3: 45,
+				4: 60,
+			}},
+		},
+	}))
 	table.Header([]string{"Severity", "Check", "Resource", "Summary", "Details"})
 	for _, finding := range report.Findings {
 		details := finding.Detail
