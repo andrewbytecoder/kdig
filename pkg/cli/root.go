@@ -1,6 +1,7 @@
 package cli
 
 import (
+	amtoolcmd "github.com/andrewbytecoder/kdig/pkg/cli/amtool"
 	"github.com/andrewbytecoder/kdig/pkg/cli/common"
 	metallbcmd "github.com/andrewbytecoder/kdig/pkg/cli/metallb"
 	prometheuscmd "github.com/andrewbytecoder/kdig/pkg/cli/prometheus"
@@ -9,6 +10,7 @@ import (
 
 func NewRootCommand() *cobra.Command {
 	commonOptions := common.NewOptions()
+	amtoolOptions := amtoolcmd.NewOptions()
 	metalLBOptions := metallbcmd.NewOptions()
 	prometheusOptions := prometheuscmd.NewOptions()
 	command := &cobra.Command{
@@ -23,6 +25,7 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	commonOptions.AddFlags(command.PersistentFlags())
+	command.AddCommand(amtoolcmd.NewCommand(commonOptions, amtoolOptions))
 	command.AddCommand(metallbcmd.NewCommand(commonOptions, metalLBOptions))
 	command.AddCommand(prometheuscmd.NewCommand(commonOptions, prometheusOptions))
 	return command

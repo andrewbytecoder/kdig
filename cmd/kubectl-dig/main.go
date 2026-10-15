@@ -11,8 +11,7 @@ import (
 
 func main() {
 	if err := cli.NewRootCommand().Execute(); err != nil {
-		var statusError *diagnostic.StatusError
-		if errors.As(err, &statusError) {
+		if statusError, ok := errors.AsType[*diagnostic.StatusError](err); ok {
 			os.Exit(statusError.Code)
 		}
 

@@ -1,6 +1,6 @@
 # kdig
 
-`kdig` is a Go-based kubectl plugin for diagnosing common MetalLB and Prometheus problems. Build the executable as `kubectl-dig`; kubectl exposes it as `kubectl dig` when the executable is on `PATH`.
+`kdig` is a Go-based kubectl plugin for diagnosing common MetalLB, Prometheus, and Alertmanager problems. Build the executable as `kubectl-dig`; kubectl exposes it as `kubectl dig` when the executable is on `PATH`.
 
 ## Build and install
 
@@ -28,7 +28,20 @@ Choose the component to diagnose:
 ```bash
 kubectl dig metallb --namespace metallb-system
 kubectl dig prometheus --namespace monitoring
+kubectl dig amtool --namespace monitoring
 ```
+
+The `amtool` command defaults to StatefulSet `alertmanager-main`, container `alertmanager`, and URL `http://localhost:9093`. Override them when the deployment uses different names:
+
+```bash
+kubectl dig amtool \
+  --namespace monitoring \
+  --statefulset alertmanager-main \
+  --container alertmanager \
+  --alertmanager-url http://localhost:9093
+```
+
+The command discovers every StatefulSet replica, such as `alertmanager-main-0`, `alertmanager-main-1`, and `alertmanager-main-2`, then executes `amtool` in each pod. The caller needs `get/list` access to StatefulSets and Pods plus permission to create `pods/exec` requests.
 
 MetalLB BGP checks execute `vtysh` in each speaker's FRR container. The defaults are namespace `metallb-system` and container `frr`; both can be overridden:
 
@@ -66,6 +79,14 @@ Prometheus checks include:
 - recent Prometheus-related warning events
 - optional Prometheus API readiness, scrape target health, and rule health
 
+Alertmanager `amtool` checks include:
+
+- StatefulSet replica availability and pod health
+- active alerts in JSON and extended output formats
+- loaded configuration summaries and cross-replica consistency
+- routing trees, active or pending silences, and cluster peer status
+- differences in active alert counts between replicas
+
 The active kubeconfig and context are used by default. Override them with `--kubeconfig` and `--context`.
 
 ## Project layout
@@ -74,10 +95,12 @@ The active kubeconfig and context are used by default. Override them with `--kub
 cmd/kubectl-dig/        plugin executable entry point
 pkg/cli/                root command assembly
 pkg/cli/common/         shared flags, clients, and report output
+pkg/cli/amtool/         Alertmanager amtool subcommand
 pkg/cli/metallb/        MetalLB subcommand
 pkg/cli/prometheus/     Prometheus subcommand
 pkg/diagnostic/         findings, reports, output, and exit codes
 pkg/kube/               Kubernetes clients and shared health checks
+pkg/amtool/             Alertmanager amtool diagnostic rules
 pkg/metallb/            MetalLB diagnostic rules
 pkg/prometheus/         Prometheus and Prometheus API diagnostic rules
 ```
