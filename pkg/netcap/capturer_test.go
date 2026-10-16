@@ -20,12 +20,14 @@ import (
 
 func TestCapturerStreamsPcapToLocalFile(t *testing.T) {
 	outputFile := filepath.Join(t.TempDir(), "capture.pcap")
-	runner := &fakeStreamRunner{pcap: testPcap()}
+	var progress bytes.Buffer
+	runner := &fakeStreamRunner{pcap: testPcap(), progress: &progress}
 	capturer := NewCapturer(testClients(), runner, Options{
 		Namespace:  "apps",
 		Pod:        "api-0",
 		OutputFile: outputFile,
 		SSHPort:    22,
+		Progress:   &progress,
 		CaptureOptions: CaptureOptions{
 			Protocol:  "tcp",
 			Port:      443,
@@ -59,6 +61,11 @@ func TestCapturerStreamsPcapToLocalFile(t *testing.T) {
 	}
 	if !findingsContain(report.Findings, outputFile) {
 		t.Fatalf("report does not contain local pcap path: %#v", report.Findings)
+	}
+	for _, expected := range []string{"Resolving network namespace", "Starting packet capture", "Pod: apps/api-0", "Network PID: 4242", "Command:", "Stop:"} {
+		if !strings.Contains(runner.progressAtStream, expected) {
+			t.Fatalf("progress was not printed before capture or does not contain %q:\n%s", expected, runner.progressAtStream)
+		}
 	}
 }
 
@@ -187,10 +194,12 @@ func TestValidateCaptureOptions(t *testing.T) {
 }
 
 type fakeStreamRunner struct {
-	commands      []string
-	streamCommand string
-	pcap          []byte
-	streamErr     error
+	commands         []string
+	streamCommand    string
+	pcap             []byte
+	streamErr        error
+	progress         *bytes.Buffer
+	progressAtStream string
 }
 
 func (runner *fakeStreamRunner) Run(_ context.Context, _ string, command string) (string, error) {
@@ -209,6 +218,9 @@ func (runner *fakeStreamRunner) Run(_ context.Context, _ string, command string)
 
 func (runner *fakeStreamRunner) Stream(_ context.Context, _ string, command string, stdout io.Writer) (string, error) {
 	runner.streamCommand = command
+	if runner.progress != nil {
+		runner.progressAtStream = runner.progress.String()
+	}
 	_, err := stdout.Write(runner.pcap)
 	if err != nil {
 		return "", err

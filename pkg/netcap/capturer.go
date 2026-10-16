@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -42,6 +43,7 @@ type Options struct {
 	CaptureOptions CaptureOptions
 	Overwrite      bool
 	SSHPort        int
+	Progress       io.Writer
 }
 
 type Capturer struct {
@@ -93,6 +95,12 @@ func (capturer *Capturer) Run(ctx context.Context) (report diagnostic.Report) {
 			return
 		}
 	}
+	if capturer.options.Progress != nil {
+		if _, err := fmt.Fprintf(capturer.options.Progress, "Resolving network namespace for Pod %s/%s...\n", capturer.options.Namespace, capturer.options.Pod); err != nil {
+			report.Add(failure("progress", diagnostic.Resource("pod", capturer.options.Namespace, capturer.options.Pod), "Cannot print capture status", err))
+			return
+		}
+	}
 	target, err := podinfo.ResolveNetworkTarget(
 		ctx,
 		capturer.clients,
@@ -123,6 +131,10 @@ func (capturer *Capturer) Run(ctx context.Context) (report diagnostic.Report) {
 	}()
 
 	command := BuildCaptureCommand(target.NetworkPID, capturer.options.CaptureOptions)
+	if err := writeProgress(capturer.options.Progress, target, absOutput, command, capturer.options.CaptureOptions); err != nil {
+		report.Add(failure("progress", diagnostic.Resource("pod", target.Namespace, target.Pod), "Cannot print capture command", err))
+		return
+	}
 	stderr, captureErr := capturer.runner.Stream(ctx, target.SSHAddress, command, temporary)
 	interrupted := errors.Is(captureErr, context.Canceled)
 	if captureErr != nil && !interrupted {
@@ -208,6 +220,34 @@ func (capturer *Capturer) Run(ctx context.Context) (report diagnostic.Report) {
 		Suggestion: suggestion,
 	})
 	return
+}
+
+func writeProgress(writer io.Writer, target podinfo.NetworkTarget, outputFile string, command string, options CaptureOptions) error {
+	if writer == nil {
+		return nil
+	}
+	stop := "Ctrl+C"
+	if options.Duration > 0 && options.Count > 0 {
+		stop = fmt.Sprintf("Ctrl+C, duration %s, or %d packets", options.Duration, options.Count)
+	} else if options.Duration > 0 {
+		stop = fmt.Sprintf("Ctrl+C or duration %s", options.Duration)
+	} else if options.Count > 0 {
+		stop = fmt.Sprintf("Ctrl+C or %d packets", options.Count)
+	}
+	_, err := fmt.Fprintf(
+		writer,
+		"Starting packet capture\n  Pod: %s/%s\n  Node: %s (%s)\n  Container: %s\n  Network PID: %d\n  Local pcap: %s\n  Command: %s\n  Stop: %s\n\n",
+		target.Namespace,
+		target.Pod,
+		target.Node,
+		target.NodeIP,
+		target.Container,
+		target.NetworkPID,
+		outputFile,
+		command,
+		stop,
+	)
+	return err
 }
 
 func ValidateCaptureOptions(options CaptureOptions) error {

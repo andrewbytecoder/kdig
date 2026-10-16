@@ -3,6 +3,7 @@ package netcap
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -64,7 +65,11 @@ func NewCommand(commonOptions *common.Options, options *Options) *cobra.Command 
 			if err != nil {
 				return err
 			}
-			return commonOptions.WriteReport(options.Report(command.Context(), clients, commonOptions.RequestTimeout))
+			var progress io.Writer = commonOptions.Out
+			if commonOptions.Output == "json" {
+				progress = command.ErrOrStderr()
+			}
+			return commonOptions.WriteReport(options.Report(command.Context(), clients, commonOptions.RequestTimeout, progress))
 		},
 	}
 
@@ -114,7 +119,7 @@ func (options *Options) Validate() error {
 	return netcapdiagnostic.ValidateCaptureOptions(options.captureOptions())
 }
 
-func (options *Options) Report(ctx context.Context, clients *kube.Clients, requestTimeout time.Duration) diagnostic.Report {
+func (options *Options) Report(ctx context.Context, clients *kube.Clients, requestTimeout time.Duration, progress io.Writer) diagnostic.Report {
 	runner := podinfo.NewSSHStreamRunner(podinfo.SSHOptions{
 		Username:            options.Username,
 		Password:            options.Password,
@@ -131,6 +136,7 @@ func (options *Options) Report(ctx context.Context, clients *kube.Clients, reque
 		CaptureOptions: options.captureOptions(),
 		Overwrite:      options.Overwrite,
 		SSHPort:        options.SSHPort,
+		Progress:       progress,
 	}).Run(ctx)
 }
 
