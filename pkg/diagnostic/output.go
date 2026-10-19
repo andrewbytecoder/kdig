@@ -9,6 +9,7 @@ import (
 )
 
 func Write(writer io.Writer, report Report, format string) error {
+	report.enrichFindings()
 	switch format {
 	case "json":
 		encoder := json.NewEncoder(writer)
@@ -34,8 +35,10 @@ func writeText(writer io.Writer, report Report) error {
 			fmt.Fprintf(&output, "  Resource: %s\n", finding.Resource)
 		}
 		fmt.Fprintf(&output, "  %s\n", finding.Summary)
+		writeIndented(&output, "Describe", finding.Describe)
 		writeIndented(&output, "Detail", finding.Detail)
 		writeIndented(&output, "Suggestion", finding.Suggestion)
+		writeIndented(&output, "Verify", strings.Join(finding.Verify, "\n"))
 		output.WriteByte('\n')
 	}
 

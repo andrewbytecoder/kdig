@@ -20,8 +20,10 @@ type Finding struct {
 	Check      string   `json:"check"`
 	Resource   string   `json:"resource,omitempty"`
 	Summary    string   `json:"summary"`
+	Describe   string   `json:"describe,omitempty"`
 	Detail     string   `json:"detail,omitempty"`
 	Suggestion string   `json:"suggestion,omitempty"`
+	Verify     []string `json:"verify,omitempty"`
 }
 
 type Report struct {
@@ -39,10 +41,11 @@ type Summary struct {
 }
 
 func (report *Report) Add(finding Finding) {
-	report.Findings = append(report.Findings, finding)
+	report.Findings = append(report.Findings, enrichFinding(report.Target, report.Namespace, finding))
 }
 
 func (report *Report) Complete() {
+	report.enrichFindings()
 	report.FinishedAt = time.Now()
 	sort.SliceStable(report.Findings, func(left, right int) bool {
 		leftRank := severityRank(report.Findings[left].Severity)
@@ -55,6 +58,12 @@ func (report *Report) Complete() {
 		}
 		return report.Findings[left].Resource < report.Findings[right].Resource
 	})
+}
+
+func (report *Report) enrichFindings() {
+	for index := range report.Findings {
+		report.Findings[index] = enrichFinding(report.Target, report.Namespace, report.Findings[index])
+	}
 }
 
 func (report Report) Summary() Summary {
