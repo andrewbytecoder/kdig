@@ -49,6 +49,16 @@ func TestCustomGuidanceIsPreserved(t *testing.T) {
 	}
 }
 
+func TestEnrichFindingAlwaysProvidesVerification(t *testing.T) {
+	finding := enrichFinding("prometheus", "monitoring", Finding{Check: "unknown-check"})
+	if len(finding.Verify) == 0 {
+		t.Fatal("Verify is empty")
+	}
+	if !containsCommand(finding.Verify, "kubectl get pods,service,statefulset,deployment,pvc -n monitoring -o wide") {
+		t.Fatalf("unexpected fallback commands: %#v", finding.Verify)
+	}
+}
+
 func containsCommand(commands []string, expected string) bool {
 	for _, command := range commands {
 		if strings.Contains(command, expected) {

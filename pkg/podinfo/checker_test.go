@@ -65,7 +65,7 @@ func TestCheckerInspectsAllPodContainers(t *testing.T) {
 	if findingCount(report.Findings, "network-namespace", diagnostic.SeverityInfo) != 2 {
 		t.Fatalf("expected network namespace details for two containers: %#v", report.Findings)
 	}
-	for _, expected := range []string{"api", "sidecar", "Network PID: 4242", "nsenter -t 4242 -n", "net:[4026533000]"} {
+	for _, expected := range []string{"api", "sidecar", "Node IP: 192.0.2.10", "Network PID: 4242", "nsenter -t 4242 -n", "net:[4026533000]"} {
 		if !findingsContain(report.Findings, expected) {
 			t.Fatalf("findings do not contain %q: %#v", expected, report.Findings)
 		}

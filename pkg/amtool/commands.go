@@ -36,7 +36,7 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 
 	version, versionErr := checker.run(ctx, pod.Name, "--version")
 	if versionErr != nil {
-		report.Add(commandFailure(resource, "amtool-version", versionErr))
+		report.Add(checker.commandFailure(pod.Name, resource, "amtool-version", versionErr, "--version"))
 		return result
 	}
 	report.Add(diagnostic.Finding{
@@ -44,15 +44,16 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 		Check:    "amtool-version",
 		Resource: resource,
 		Summary:  firstLine(version),
+		Verify:   checker.amtoolVerify(pod.Name, "--version"),
 	})
 
 	alertsOutput, alertsErr := checker.run(ctx, pod.Name, "-o", "json", "alert", "query")
 	if alertsErr != nil {
-		report.Add(commandFailure(resource, "alerts", alertsErr))
+		report.Add(checker.commandFailure(pod.Name, resource, "alerts", alertsErr, "-o", "json", "alert", "query"))
 	} else {
 		alerts, parseErr := parseAlerts(alertsOutput)
 		if parseErr != nil {
-			report.Add(parseFailure(resource, "alerts", parseErr, alertsOutput))
+			report.Add(checker.parseFailure(pod.Name, resource, "alerts", parseErr, alertsOutput, "-o", "json", "alert", "query"))
 		} else {
 			result.alertCount = len(alerts)
 			result.alertsCollected = true
@@ -63,7 +64,7 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 
 	extendedOutput, extendedErr := checker.run(ctx, pod.Name, "-o", "extended", "alert", "query")
 	if extendedErr != nil {
-		report.Add(commandFailure(resource, "alerts-extended", extendedErr))
+		report.Add(checker.commandFailure(pod.Name, resource, "alerts-extended", extendedErr, "-o", "extended", "alert", "query"))
 	} else {
 		report.Add(diagnostic.Finding{
 			Severity: diagnostic.SeverityInfo,
@@ -71,12 +72,13 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 			Resource: resource,
 			Summary:  "Collected extended alert details",
 			Detail:   truncateOutput(extendedOutput),
+			Verify:   checker.amtoolVerify(pod.Name, "-o", "extended", "alert", "query"),
 		})
 	}
 
 	configOutput, configErr := checker.run(ctx, pod.Name, "config", "show")
 	if configErr != nil {
-		report.Add(commandFailure(resource, "configuration", configErr))
+		report.Add(checker.commandFailure(pod.Name, resource, "configuration", configErr, "config", "show"))
 	} else {
 		result.configOutput = normalizeConfig(configOutput)
 		report.Add(diagnostic.Finding{
@@ -85,12 +87,13 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 			Resource: resource,
 			Summary:  "Loaded Alertmanager configuration via amtool",
 			Detail:   configSummary(configOutput) + "\n\nLoaded configuration (sensitive values redacted):\n" + truncateOutput(redactConfig(configOutput)),
+			Verify:   checker.amtoolVerify(pod.Name, "config", "show"),
 		})
 	}
 
 	routesOutput, routesErr := checker.run(ctx, pod.Name, "config", "routes", "show")
 	if routesErr != nil {
-		report.Add(commandFailure(resource, "routes", routesErr))
+		report.Add(checker.commandFailure(pod.Name, resource, "routes", routesErr, "config", "routes", "show"))
 	} else {
 		report.Add(diagnostic.Finding{
 			Severity: diagnostic.SeverityInfo,
@@ -98,16 +101,17 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 			Resource: resource,
 			Summary:  "Collected Alertmanager routing tree",
 			Detail:   truncateOutput(routesOutput),
+			Verify:   checker.amtoolVerify(pod.Name, "config", "routes", "show"),
 		})
 	}
 
 	silencesOutput, silencesErr := checker.run(ctx, pod.Name, "-o", "json", "silence", "query")
 	if silencesErr != nil {
-		report.Add(commandFailure(resource, "silences", silencesErr))
+		report.Add(checker.commandFailure(pod.Name, resource, "silences", silencesErr, "-o", "json", "silence", "query"))
 	} else {
 		silences, parseErr := parseSilences(silencesOutput)
 		if parseErr != nil {
-			report.Add(parseFailure(resource, "silences", parseErr, silencesOutput))
+			report.Add(checker.parseFailure(pod.Name, resource, "silences", parseErr, silencesOutput, "-o", "json", "silence", "query"))
 		} else {
 			active := 0
 			pending := 0
@@ -124,13 +128,14 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 				Check:    "silences",
 				Resource: resource,
 				Summary:  fmt.Sprintf("Found %d silences: %d active, %d pending", len(silences), active, pending),
+				Verify:   checker.amtoolVerify(pod.Name, "silence", "query"),
 			})
 		}
 	}
 
 	clusterOutput, clusterErr := checker.run(ctx, pod.Name, "cluster", "show")
 	if clusterErr != nil {
-		report.Add(commandFailure(resource, "cluster", clusterErr))
+		report.Add(checker.commandFailure(pod.Name, resource, "cluster", clusterErr, "cluster", "show"))
 	} else {
 		report.Add(diagnostic.Finding{
 			Severity: diagnostic.SeverityInfo,
@@ -138,9 +143,34 @@ func (checker *Checker) collectFromPod(ctx context.Context, report *diagnostic.R
 			Resource: resource,
 			Summary:  "Collected Alertmanager cluster status",
 			Detail:   truncateOutput(clusterOutput),
+			Verify:   checker.amtoolVerify(pod.Name, "cluster", "show"),
 		})
 	}
 	return result
+}
+
+func (checker *Checker) amtoolVerify(pod string, arguments ...string) []string {
+	if pod == "" {
+		return nil
+	}
+	command := []string{
+		"kubectl", "exec", "-n", checker.options.Namespace, pod,
+		"-c", checker.options.Container, "--", "amtool",
+		"--alertmanager.url=" + checker.options.AlertmanagerURL,
+	}
+	command = append(command, arguments...)
+	return []string{
+		"kubectl get pod " + pod + " -n " + checker.options.Namespace + " -o wide",
+		strings.Join(command, " "),
+	}
+}
+
+func resourcePodName(resource string) string {
+	parts := strings.Split(resource, "/")
+	if len(parts) >= 3 && parts[0] == "pod" {
+		return parts[2]
+	}
+	return ""
 }
 
 func (checker *Checker) run(ctx context.Context, pod string, arguments ...string) (string, error) {
@@ -200,6 +230,7 @@ func (checker *Checker) addAlertFindings(report *diagnostic.Report, resource str
 		Resource: resource,
 		Summary:  fmt.Sprintf("Found %d active alerts, %d actionable, %d critical", len(alerts), actionable, critical),
 		Detail:   "By severity: " + formatCounts(bySeverity) + "\nBy alert name: " + formatCounts(byName),
+		Verify:   checker.amtoolVerify(resourcePodName(resource), "alert", "query"),
 	})
 }
 
@@ -274,7 +305,7 @@ func alertDigest(alerts []alert) string {
 	return hex.EncodeToString(digest[:8])
 }
 
-func commandFailure(resource, check string, err error) diagnostic.Finding {
+func (checker *Checker) commandFailure(pod string, resource string, check string, err error, arguments ...string) diagnostic.Finding {
 	return diagnostic.Finding{
 		Severity:   diagnostic.SeverityWarning,
 		Check:      check,
@@ -282,16 +313,18 @@ func commandFailure(resource, check string, err error) diagnostic.Finding {
 		Summary:    "amtool command failed",
 		Detail:     err.Error(),
 		Suggestion: "Verify amtool exists in the selected container, the local Alertmanager URL is correct, and pods/exec is allowed.",
+		Verify:     checker.amtoolVerify(pod, arguments...),
 	}
 }
 
-func parseFailure(resource, check string, err error, output string) diagnostic.Finding {
+func (checker *Checker) parseFailure(pod string, resource string, check string, err error, output string, arguments ...string) diagnostic.Finding {
 	return diagnostic.Finding{
 		Severity: diagnostic.SeverityWarning,
 		Check:    check,
 		Resource: resource,
 		Summary:  "Cannot parse amtool output",
 		Detail:   err.Error() + "\n" + truncateOutput(output),
+		Verify:   checker.amtoolVerify(pod, arguments...),
 	}
 }
 

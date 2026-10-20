@@ -71,13 +71,18 @@ func (checker *Checker) checkSpeakerBGP(ctx context.Context, report *diagnostic.
 			Summary:    fmt.Sprintf("FRR container %q was not found on speaker pod", checker.options.FRRContainer),
 			Detail:     "Node: " + valueOrDash(pod.Spec.NodeName),
 			Suggestion: "Set --frr-container to the deployed FRR container name or verify MetalLB FRR mode is enabled.",
+			Verify: []string{
+				"kubectl get pod " + pod.Name + " -n " + checker.options.Namespace + " -o jsonpath='{.spec.containers[*].name}{\"\\n\"}'",
+			},
 		})
 		return
 	}
 
 	summary, stderr, err := checker.execVtysh(ctx, pod.Name, "show bgp summary")
 	if err != nil {
-		report.Add(execFailure("bgp-sessions", resource, "BGP summary", stderr, err))
+		finding := execFailure("bgp-sessions", resource, "BGP summary", stderr, err)
+		finding.Verify = checker.vtyshVerify(pod.Name, "show bgp summary")
+		report.Add(finding)
 		return
 	}
 	neighbors := parseBGPSummary(summary)
@@ -87,6 +92,7 @@ func (checker *Checker) checkSpeakerBGP(ctx context.Context, report *diagnostic.
 		Resource: resource,
 		Summary:  fmt.Sprintf("Collected BGP summary on node %s; found %d neighbors", valueOrDash(pod.Spec.NodeName), len(neighbors)),
 		Detail:   truncateOutput(summary),
+		Verify:   checker.vtyshVerify(pod.Name, "show bgp summary"),
 	})
 	if len(neighbors) == 0 {
 		report.Add(diagnostic.Finding{
@@ -111,13 +117,16 @@ func (checker *Checker) checkSpeakerBGP(ctx context.Context, report *diagnostic.
 			Summary:    "BGP neighbor state: " + neighbor.state,
 			Detail:     "Node: " + valueOrDash(pod.Spec.NodeName),
 			Suggestion: suggestion,
+			Verify:     checker.vtyshVerify(pod.Name, "show bgp neighbors "+neighbor.address),
 		})
 		checker.checkAdvertisedRoutes(ctx, report, pod, neighbor.address)
 	}
 
 	routes, routeStderr, routeErr := checker.execVtysh(ctx, pod.Name, "show bgp ipv4 unicast")
 	if routeErr != nil {
-		report.Add(execFailure("bgp-routes", resource, "IPv4 unicast BGP routing table", routeStderr, routeErr))
+		finding := execFailure("bgp-routes", resource, "IPv4 unicast BGP routing table", routeStderr, routeErr)
+		finding.Verify = checker.vtyshVerify(pod.Name, "show bgp ipv4 unicast")
+		report.Add(finding)
 		return
 	}
 	report.Add(diagnostic.Finding{
@@ -126,6 +135,7 @@ func (checker *Checker) checkSpeakerBGP(ctx context.Context, report *diagnostic.
 		Resource: resource,
 		Summary:  "Collected IPv4 unicast BGP routing table",
 		Detail:   truncateOutput(routes),
+		Verify:   checker.vtyshVerify(pod.Name, "show bgp ipv4 unicast"),
 	})
 }
 
@@ -133,7 +143,9 @@ func (checker *Checker) checkAdvertisedRoutes(ctx context.Context, report *diagn
 	output, stderr, err := checker.execVtysh(ctx, pod.Name, "show bgp neighbors "+neighbor+" advertised-routes")
 	resource := pod.Name + "/" + neighbor
 	if err != nil {
-		report.Add(execFailure("advertised-routes", resource, "advertised routes", stderr, err))
+		finding := execFailure("advertised-routes", resource, "advertised routes", stderr, err)
+		finding.Verify = checker.vtyshVerify(pod.Name, "show bgp neighbors "+neighbor+" advertised-routes")
+		report.Add(finding)
 		return
 	}
 	report.Add(diagnostic.Finding{
@@ -142,6 +154,7 @@ func (checker *Checker) checkAdvertisedRoutes(ctx context.Context, report *diagn
 		Resource: resource,
 		Summary:  "Collected routes advertised to BGP neighbor",
 		Detail:   truncateOutput(output),
+		Verify:   checker.vtyshVerify(pod.Name, "show bgp neighbors "+neighbor+" advertised-routes"),
 	})
 }
 
@@ -153,6 +166,17 @@ func (checker *Checker) execVtysh(ctx context.Context, pod string, command strin
 		checker.options.FRRContainer,
 		[]string{"vtysh", "-c", command},
 	)
+}
+
+func (checker *Checker) vtyshVerify(pod string, command string) []string {
+	return []string{
+		"kubectl get pod " + pod + " -n " + checker.options.Namespace + " -o wide",
+		"kubectl exec -n " + checker.options.Namespace + " " + pod + " -c " + checker.options.FRRContainer + " -- vtysh -c " + shellQuote(command),
+	}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (checker *Checker) addNetworkSuggestions(report *diagnostic.Report, serviceAddresses, peerAddresses []string) {

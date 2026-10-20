@@ -20,7 +20,7 @@ func (checker *Checker) checkPrometheusAPI(ctx context.Context, report *diagnost
 		if err != nil {
 			detail = err.Error()
 		}
-		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityCritical, Check: "prometheus-api", Summary: "Invalid Prometheus URL", Detail: detail})
+		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityCritical, Check: "prometheus-api", Summary: "Invalid Prometheus URL", Detail: detail, Verify: []string{"curl -v " + shellQuote(baseURL)}})
 		return
 	}
 	if err := checker.checkReady(ctx, baseURL); err != nil {
@@ -31,10 +31,11 @@ func (checker *Checker) checkPrometheusAPI(ctx context.Context, report *diagnost
 			Summary:    "Prometheus readiness check failed",
 			Detail:     err.Error(),
 			Suggestion: "Verify the URL, network path, Prometheus logs, configuration, and storage health.",
+			Verify:     []string{"curl -v " + shellQuote(baseURL+"/-/ready")},
 		})
 		return
 	}
-	report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "prometheus-api", Resource: baseURL, Summary: "Prometheus is ready"})
+	report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "prometheus-api", Resource: baseURL, Summary: "Prometheus is ready", Verify: []string{"curl -v " + shellQuote(baseURL+"/-/ready")}})
 	checker.checkTargets(ctx, report, baseURL)
 	checker.checkRules(ctx, report, baseURL)
 }
@@ -69,7 +70,7 @@ func (checker *Checker) checkTargets(ctx context.Context, report *diagnostic.Rep
 		} `json:"data"`
 	}
 	if err := checker.getJSON(ctx, baseURL+"/api/v1/targets?state=active", &response); err != nil {
-		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityWarning, Check: "scrape-targets", Summary: "Cannot query Prometheus scrape targets", Detail: err.Error()})
+		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityWarning, Check: "scrape-targets", Summary: "Cannot query Prometheus scrape targets", Detail: err.Error(), Verify: []string{"curl -s " + shellQuote(baseURL+"/api/v1/targets?state=active")}})
 		return
 	}
 	unhealthy := 0
@@ -90,10 +91,11 @@ func (checker *Checker) checkTargets(ctx context.Context, report *diagnostic.Rep
 			Summary:    fmt.Sprintf("Scrape target is %s", target.Health),
 			Detail:     target.LastError,
 			Suggestion: "Verify service discovery labels, endpoint reachability, TLS credentials, and the metrics path.",
+			Verify:     []string{"curl -s " + shellQuote(baseURL+"/api/v1/targets?state=active")},
 		})
 	}
 	if unhealthy == 0 {
-		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "scrape-targets", Summary: fmt.Sprintf("All %d active scrape targets are healthy", len(response.Data.ActiveTargets))})
+		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "scrape-targets", Summary: fmt.Sprintf("All %d active scrape targets are healthy", len(response.Data.ActiveTargets)), Verify: []string{"curl -s " + shellQuote(baseURL+"/api/v1/targets?state=active")}})
 	}
 }
 
@@ -111,7 +113,7 @@ func (checker *Checker) checkRules(ctx context.Context, report *diagnostic.Repor
 		} `json:"data"`
 	}
 	if err := checker.getJSON(ctx, baseURL+"/api/v1/rules", &response); err != nil {
-		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityWarning, Check: "rules", Summary: "Cannot query Prometheus rules", Detail: err.Error()})
+		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityWarning, Check: "rules", Summary: "Cannot query Prometheus rules", Detail: err.Error(), Verify: []string{"curl -s " + shellQuote(baseURL+"/api/v1/rules")}})
 		return
 	}
 	failed := 0
@@ -130,12 +132,17 @@ func (checker *Checker) checkRules(ctx context.Context, report *diagnostic.Repor
 				Summary:    fmt.Sprintf("Prometheus rule is %s", rule.Health),
 				Detail:     rule.LastError,
 				Suggestion: "Correct the rule expression and verify referenced metrics and labels.",
+				Verify:     []string{"curl -s " + shellQuote(baseURL+"/api/v1/rules")},
 			})
 		}
 	}
 	if failed == 0 {
-		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "rules", Summary: fmt.Sprintf("All %d rules are healthy", total)})
+		report.Add(diagnostic.Finding{Severity: diagnostic.SeverityInfo, Check: "rules", Summary: fmt.Sprintf("All %d rules are healthy", total), Verify: []string{"curl -s " + shellQuote(baseURL+"/api/v1/rules")}})
 	}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (checker *Checker) getJSON(ctx context.Context, endpoint string, destination any) error {

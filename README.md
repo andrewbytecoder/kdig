@@ -102,6 +102,13 @@ kubectl dig prometheus --prometheus-url http://127.0.0.1:9090
 
 The default output is plain text. Machine-readable output is available with `--output json`. Exit code `0` means only informational findings, `1` means warnings were found, and `2` means at least one critical problem was found.
 
+Each diagnostic finding includes:
+
+- `Describe`: what the reported state means
+- `Detail`: the values collected by client-go or the remote diagnostic command
+- `Suggestion`: the recommended remediation when applicable
+- `Verify`: equivalent `kubectl`, `kubectl exec`, `curl`, or node-side commands for manually reproducing the check
+
 ## Checks
 
 MetalLB checks include:

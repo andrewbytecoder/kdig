@@ -16,9 +16,30 @@ func enrichFinding(target string, namespace string, finding Finding) Finding {
 	if len(finding.Verify) == 0 {
 		commands := commandsForResource(parseResource(finding.Resource), namespace)
 		commands = append(commands, commandsForCheck(target, check, namespace, finding)...)
+		if len(commands) == 0 {
+			commands = fallbackCommands(target, namespace)
+		}
 		finding.Verify = uniqueCommands(commands)
 	}
 	return finding
+}
+
+func fallbackCommands(target string, namespace string) []string {
+	switch target {
+	case "metallb":
+		return []string{"kubectl get all -n " + namespace + " -o wide"}
+	case "prometheus":
+		return []string{"kubectl get pods,service,statefulset,deployment,pvc -n " + namespace + " -o wide"}
+	case "amtool":
+		return []string{"kubectl get statefulset,pods -n " + namespace + " -o wide | grep alertmanager"}
+	case "podinfo", "netcap":
+		return []string{"kubectl get pods -n " + namespace + " -o wide"}
+	default:
+		if namespace != "" {
+			return []string{"kubectl get pods -n " + namespace + " -o wide"}
+		}
+		return []string{"kubectl cluster-info"}
+	}
 }
 
 func describeCheck(target string, check string) string {
@@ -331,9 +352,17 @@ func netcapCommands(namespace string, finding Finding) []string {
 		"kubectl get pod " + pod + " -n " + namespace + " -o jsonpath='{.spec.nodeName}{\"\\n\"}{.status.containerStatuses[*].containerID}{\"\\n\"}'",
 	}
 	if remoteCommand := detailValue(finding.Detail, "Remote command"); remoteCommand != "" {
-		commands = append(commands, "ssh <user>@<node-ip> \""+strings.ReplaceAll(remoteCommand, "\"", "\\\"")+"\"")
+		nodeIP := detailValue(finding.Detail, "Node IP")
+		if nodeIP == "" {
+			nodeIP = "<node-ip>"
+		}
+		commands = append(commands, "ssh <user>@"+nodeIP+" -- sh -c "+shellQuote(remoteCommand))
 	}
 	return commands
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func warningEventsCommand(namespace string) []string {

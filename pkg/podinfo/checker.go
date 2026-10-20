@@ -200,6 +200,10 @@ func (checker *Checker) inspectPod(ctx context.Context, report *diagnostic.Repor
 		Resource: diagnostic.Resource("node", "", node.Name),
 		Summary:  firstLine(runtime.version),
 		Detail:   fmt.Sprintf("SSH: %s@%s", checker.options.Username, address),
+		Verify: []string{
+			"ssh " + checker.options.Username + "@" + nodeIP + " 'crictl --version'",
+			"ssh " + checker.options.Username + "@" + nodeIP + " 'crictl ps -a'",
+		},
 	})
 
 	if runtime.containersErr != nil {
@@ -267,6 +271,10 @@ func (checker *Checker) inspectContainers(
 	pod corev1.Pod,
 	containers []runtimeContainer,
 ) {
+	nodeIP := address
+	if host, _, err := net.SplitHostPort(address); err == nil {
+		nodeIP = host
+	}
 	namespaces := make(map[string][]string)
 	foundNames := make(map[string]struct{}, len(containers))
 	for _, container := range containers {
@@ -311,6 +319,7 @@ func (checker *Checker) inspectContainers(
 		}
 		namespaces[namespaceID] = append(namespaces[namespaceID], container.Metadata.Name)
 		detail := []string{
+			"Node IP: " + nodeIP,
 			"CRI container ID: " + container.ID,
 			"CRI state: " + valueOrDash(container.State),
 			"Network PID: " + strconv.Itoa(pid),
@@ -323,6 +332,11 @@ func (checker *Checker) inspectContainers(
 			Resource: containerResource(pod, container),
 			Summary:  fmt.Sprintf("Container %s uses network PID %d", container.Metadata.Name, pid),
 			Detail:   strings.Join(detail, "\n"),
+			Verify: []string{
+				"kubectl get pod " + pod.Name + " -n " + pod.Namespace + " -o wide",
+				"ssh " + checker.options.Username + "@" + nodeIP + " 'crictl inspect " + container.ID + "'",
+				"ssh " + checker.options.Username + "@" + nodeIP + " 'nsenter -t " + strconv.Itoa(pid) + " -n'",
+			},
 		})
 	}
 
